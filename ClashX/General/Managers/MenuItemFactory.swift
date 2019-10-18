@@ -11,13 +11,16 @@ import SwiftyJSON
 import RxCocoa
 
 class MenuItemFactory {
-    static func menuItems(completionHandler:@escaping (([NSMenuItem])->())){
-        ApiRequest.requestProxyGroupList { (proxyInfo) in
+    static func menuItems(completionHandler: @escaping (([NSMenuItem])->Void)){
+        
+        if ConfigManager.shared.currentConfig?.mode == .direct {
+            completionHandler([])
+            return
+        }
+        
+        ApiRequest.requestProxyGroupList() {
+            proxyInfo in
             var menuItems = [NSMenuItem]()
-            if (ConfigManager.shared.currentConfig?.mode == .direct) {
-                completionHandler(menuItems)
-                return
-            }
             
             for proxy in proxyInfo.proxyGroups {
                 var menu:NSMenuItem?
@@ -38,17 +41,6 @@ class MenuItemFactory {
         }
     }
     
-    static func proxygroupTitle(name:String,now:String) -> NSAttributedString? {
-        if ConfigManager.shared.disableShowCurrentProxyInMenu {
-            return nil
-        }
-        let now = String(now.utf16.prefix(15)) ?? ""
-        let str = "\(name)    \(now)"
-        let attributed = NSMutableAttributedString(string: str)
-        let nowAttr = [NSAttributedString.Key.foregroundColor:NSColor.gray]
-        attributed.setAttributes(nowAttr, range: NSRange(name.utf16.count+1 ..< str.utf16.count))
-        return attributed
-    }
     
     static func generateSelectorMenuItem(proxyGroup:ClashProxy,
                                          proxyInfo:ClashProxyResp) -> NSMenuItem? {
@@ -63,7 +55,9 @@ class MenuItemFactory {
         
         let menu = NSMenuItem(title: proxyGroup.name, action: nil, keyEquivalent: "")
         let selectedName = proxyGroup.now ?? ""
-        menu.attributedTitle = proxygroupTitle(name: proxyGroup.name, now: selectedName)
+        if !ConfigManager.shared.disableShowCurrentProxyInMenu {
+            menu.view = ProxyGroupMenuItemView(group: proxyGroup.name, targetProxy: selectedName)
+        }
         let submenu = NSMenu(title: proxyGroup.name)
         var hasSelected = false
         
@@ -82,9 +76,13 @@ class MenuItemFactory {
             submenu.addItem(proxyItem)
         }
         
-        menu.submenu = submenu
         if (!hasSelected && submenu.items.count>0) {
             self.actionSelectProxy(sender: submenu.items[0] as! ProxyMenuItem)
+        }
+        addSpeedTestMenuItem(submenu, proxyGroup: proxyGroup)
+        menu.submenu = submenu
+        if !ConfigManager.shared.disableShowCurrentProxyInMenu {
+            menu.view = ProxyGroupMenuItemView(group: proxyGroup.name, targetProxy: selectedName)
         }
         return menu
     }
@@ -95,8 +93,9 @@ class MenuItemFactory {
         let proxyMap = proxyInfo.proxiesMap
         let selectedName = proxyGroup.now ?? ""
         let menu = NSMenuItem(title: proxyGroup.name, action: nil, keyEquivalent: "")
-        menu.attributedTitle = proxygroupTitle(name: proxyGroup.name, now: selectedName)
-        
+        if !ConfigManager.shared.disableShowCurrentProxyInMenu {
+            menu.view = ProxyGroupMenuItemView(group: proxyGroup.name, targetProxy: selectedName)
+        }
         let submenu = NSMenu(title: proxyGroup.name)
 
         let nowMenuItem = NSMenuItem(title: "now:\(selectedName)", action: #selector(empty), keyEquivalent: "")
@@ -125,6 +124,14 @@ class MenuItemFactory {
         }
         menu.submenu = submenu
         return menu
+    }
+    
+    static func addSpeedTestMenuItem(_ menus: NSMenu, proxyGroup: ClashProxy) {
+        menus.addItem(NSMenuItem.separator())
+        let speedTestItem = ProxyGroupSpeedTestMenuItem(group: proxyGroup)
+        speedTestItem.target = MenuItemFactory.self
+        speedTestItem.action = #selector(empty)
+        menus.addItem(speedTestItem)
     }
     
     static func generateHistoryMenu(_ proxy:ClashProxy) -> NSMenu? {
@@ -192,7 +199,9 @@ extension MenuItemFactory {
     @objc static func actionSelectConfig(sender:NSMenuItem){
         let config = sender.title
         ConfigManager.selectConfigName = config
-        NotificationCenter.default.post(Notification(name: kShouldUpDateConfig))
+        NotificationCenter.default.post(name: kShouldUpDateConfig,
+                                        object: nil,
+                                        userInfo: ["notification": false])
     }
     
     @objc static func empty(){}

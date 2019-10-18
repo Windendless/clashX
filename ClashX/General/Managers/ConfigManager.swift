@@ -9,14 +9,14 @@
 import Foundation
 import Cocoa
 import RxSwift
-import Yams
+import RxCocoa
 
 class ConfigManager {
     
     static let shared = ConfigManager()
     private let disposeBag = DisposeBag()
     var apiPort = "8080"
-    var apiSecret:String? = nil
+    var apiSecret:String = ""
     
     init() {
         UserDefaults.standard.rx.observe(Bool.self, "kSDisableShowCurrentProxyInMenu").bind {
@@ -25,24 +25,24 @@ class ConfigManager {
         }.disposed(by: disposeBag)
     }
     
-    var currentConfig:ClashConfig?{
+    var currentConfig: ClashConfig?{
         get {
             return currentConfigVariable.value
         }
         
         set {
-            currentConfigVariable.value = newValue
+            currentConfigVariable.accept(newValue)
         }
     }
-    var currentConfigVariable = Variable<ClashConfig?>(nil)
+    var currentConfigVariable = BehaviorRelay<ClashConfig?>(value: nil)
     
-    var isRunning:Bool{
+    var isRunning: Bool{
         get {
             return isRunningVariable.value
         }
         
         set {
-            isRunningVariable.value = newValue
+            isRunningVariable.accept(newValue)
         }
     }
     
@@ -50,7 +50,10 @@ class ConfigManager {
     
     static var selectConfigName:String{
         get {
-            return UserDefaults.standard.string(forKey: "selectConfigName") ?? "config"
+            if shared.isRunning {
+                return UserDefaults.standard.string(forKey: "selectConfigName") ?? "config"
+            }
+            return "config"
         }
         set {
             UserDefaults.standard.set(newValue, forKey: "selectConfigName")
@@ -58,7 +61,7 @@ class ConfigManager {
         }
     }
     
-    var isRunningVariable = Variable<Bool>(false)
+    var isRunningVariable = BehaviorRelay<Bool>(value: false)
     
     var proxyPortAutoSet:Bool {
         get{
@@ -68,7 +71,9 @@ class ConfigManager {
             UserDefaults.standard.set(newValue, forKey: "proxyPortAutoSet")
         }
     }
-    let proxyPortAutoSetObservable = UserDefaults.standard.rx.observe(Bool.self, "proxyPortAutoSet")
+    let proxyPortAutoSetObservable = UserDefaults.standard.rx.observe(Bool.self, "proxyPortAutoSet").map({$0 ?? false})
+    
+    var isProxySetByOtherVariable = BehaviorRelay<Bool>(value: false)
     
     var showNetSpeedIndicator:Bool {
         get{
@@ -80,10 +85,18 @@ class ConfigManager {
     }
     let showNetSpeedIndicatorObservable = UserDefaults.standard.rx.observe(Bool.self, "showNetSpeedIndicator")
     
-    static var apiUrl:String{
-        get {
-            return "http://127.0.0.1:\(shared.apiPort)"
+    var benchMarkUrl: String = UserDefaults.standard.string(forKey: "benchMarkUrl") ?? "http://www.gstatic.com/generate_204" {
+        didSet {
+            UserDefaults.standard.set(benchMarkUrl, forKey: "benchMarkUrl")
         }
+    }
+    
+    static var apiUrl:String{
+        return "http://127.0.0.1:\(shared.apiPort)"
+    }
+    
+    static var webSocketUrl: String {
+        return "ws://127.0.0.1:\(shared.apiPort)"
     }
     
     
@@ -124,21 +137,9 @@ class ConfigManager {
         }
     }
     
-    func refreshApiInfo(){
-        apiPort = "7892"
-        apiSecret = nil;
-        if let yamlStr = try? String(contentsOfFile: kDefaultConfigFilePath),
-            var yaml = (try? Yams.load(yaml: yamlStr)) as? [String:Any] {
-            if let controller = yaml["external-controller"] as? String,
-                let port = controller.split(separator: ":").last{
-                apiPort = String(port)
-            } else {
-                yaml["external-controller"] = apiPort
-                ConfigFileManager.saveToClashConfigFile(config: yaml)
-            }
-            apiSecret = yaml["secret"] as? String
-        } else {
-            _ = ConfigFileManager.replaceConfigWithSampleConfig()
+    static var builtInApiMode = (UserDefaults.standard.object(forKey: "kBuiltInApiMode") as? Bool) ?? true {
+        didSet {
+            UserDefaults.standard.set(builtInApiMode, forKey: "kBuiltInApiMode")
         }
     }
     
@@ -149,7 +150,7 @@ extension ConfigManager {
         do {
             let fileURLs = try FileManager.default.contentsOfDirectory(atPath: kConfigFolderPath)
             return fileURLs
-                .filter { String($0.split(separator: ".").last ?? "") == "yml"}
+                .filter { String($0.split(separator: ".").last ?? "") == "yaml"}
                 .map{$0.split(separator: ".").dropLast().joined(separator: ".")}
         } catch {
             return ["config"]

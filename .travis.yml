@@ -1,5 +1,5 @@
 language: objective-c
-osx_image: xcode10.2
+osx_image: xcode11
 node_js: 10
 before_install:
 - openssl aes-256-cbc -K $encrypted_a43c9d4ca4d4_key -iv $encrypted_a43c9d4ca4d4_iv
@@ -12,25 +12,33 @@ before_install:
   -P ""
 - 'security set-key-partition-list -S apple-tool:,apple: -s -k mysecretpassword build.keychain'
 install:
-- wget http://geolite.maxmind.com/download/geoip/database/GeoLite2-Country.tar.gz
-- tar -zxvf GeoLite2-Country.tar.gz
-- mv GeoLite2-Country_*/GeoLite2-Country.mmdb ./ClashX/Support\ Files/Country.mmdb
-- cd ClashX/Resources
-- git clone -b gh-pages https://github.com/Dreamacro/clash-dashboard.git dashboard
-- cd ..
+- bash install_dependency.sh
+- cd $TRAVIS_BUILD_DIR/ClashX
 - echo `go version`
-- CGO_CFLAGS=-mmacosx-version-min=10.10 CGO_LDFLAGS=-mmacosx-version-min=10.10 go build -buildmode=c-archive
+#- brew update
+#- brew upgrade go || true
+#- echo `go version`
+- python3 build_clash.py
 - cd $TRAVIS_BUILD_DIR
+
 script:
 - 'xcodebuild -workspace ClashX.xcworkspace -scheme "ClashX" build CODE_SIGN_IDENTITY="Developer
-  ID Application: Fuzhou West2Online Internet Inc. (MEWHFZ92DY)"| xcpretty'
+  ID Application: Fuzhou West2Online Internet Inc. (MEWHFZ92DY)"'
+
+- echo "Checking SMJobBless Vailded"
+- build_dir=`xcodebuild -workspace ClashX.xcworkspace -scheme "ClashX" -showBuildSettings -configuration Debug | grep -m 1 "TARGET_BUILD_DIR" | grep -oEi "\/.*"`
+- build_dir=${build_dir}"/ClashX.app"
+- python SMJobBlessUtil.py check ${build_dir}
+- echo "Check completed"
 
 before_deploy:
 - gem install gym
+- bundle install
 - fastlane gym -s ClashX
 - npm install --global create-dmg
 - create-dmg ClashX.app
 - mv ClashX*.dmg ClashX.dmg
+- fastlane run notarize package:"./ClashX.dmg" bundle_id:"com.west2online.ClashX"
 
 deploy:
   provider: releases
